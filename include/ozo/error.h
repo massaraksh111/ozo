@@ -85,6 +85,8 @@ enum code {
     result_status_empty_query, //!< the string sent to the server was empty
     result_status_bad_response, //!< the server's response was not understood
     oid_request_failed, //!< error during request oids from a database
+    pq_cancel_failed, //!< libpq PQcancel function call failed, see `get_error_context()` for more information
+    pq_get_cancel_failed, //!< libpq PQgetCancel function call failed, see `get_error_context()` for more information
 };
 
 /**
@@ -439,6 +441,10 @@ public:
                 return "result_status_bad_response - the server's response was not understood";
             case oid_request_failed:
                 return "error during request oids from a database";
+            case pq_cancel_failed:
+                return "libpq PQcancel function call failed";
+            case pq_get_cancel_failed:
+                return "libpq PQgetCancel function call failed";
         }
         return "no message for value: " + std::to_string(value);
     }
