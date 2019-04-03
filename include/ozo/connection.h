@@ -7,6 +7,7 @@
 #include <ozo/core/recursive.h>
 
 #include <ozo/detail/bind.h>
+#include <ozo/detail/functional.h>
 #include <ozo/impl/connection.h>
 
 #include <boost/asio/dispatch.hpp>
@@ -694,17 +695,32 @@ struct get_connection_type
 template <typename ConnectionProvider>
 using connection_type = typename get_connection_type<std::decay_t<ConnectionProvider>>::type;
 
-template <typename T, typename = std::void_t<>>
-struct async_get_connection_impl_default {
+namespace detail {
+
+struct call_async_get_connection {
     template <typename Provider, typename Handler>
     static constexpr auto apply(Provider&& p, Handler&& h) ->
             decltype(p.async_get_connection(std::forward<Handler>(h))) {
-        p.async_get_connection(std::forward<Handler>(h));
+        return p.async_get_connection(std::forward<Handler>(h));
     }
 };
 
+struct forward_connection {
+    template <typename Conn, typename Handler>
+    static constexpr void apply(Conn&& c, Handler&& h) {
+        reset_error_context(c);
+        auto ex = get_executor(c);
+        asio::dispatch(ex, detail::bind(std::forward<Handler>(h), error_code{}, std::forward<Conn>(c)));
+    }
+};
+
+} // namespace detail
+
 template <typename Provider>
-struct async_get_connection_impl : async_get_connection_impl_default<Provider> {};
+struct async_get_connection_impl : std::conditional_t<Connection<Provider>,
+    detail::forward_connection,
+    detail::call_async_get_connection
+> {};
 
 template <typename, typename = std::void_t<>>
 struct is_connection_source : std::false_type {};
@@ -773,10 +789,11 @@ struct is_connection_source<T, std::void_t<decltype(
 template <typename T>
 constexpr auto ConnectionSource = is_connection_source<std::decay_t<T>>::value;
 
-template <typename Provider, typename Handler>
-constexpr auto async_get_connection(Provider&& p, Handler&& h) ->
-        decltype(async_get_connection_impl<std::decay_t<Provider>>::apply(std::forward<Provider>(p), std::forward<Handler>(h))) {
-    return async_get_connection_impl<std::decay_t<Provider>>::apply(std::forward<Provider>(p), std::forward<Handler>(h));
+template <typename Provider, typename Handler,
+    typename = Require<detail::IsApplicable<async_get_connection_impl, Provider, Handler>>
+>
+constexpr void async_get_connection(Provider&& p, Handler&& h) {
+    detail::apply<async_get_connection_impl>(std::forward<Provider>(p), std::forward<Handler>(h));
 }
 
 template <typename, typename = std::void_t<>>
@@ -884,16 +901,6 @@ inline auto get_connection(T&& provider, CompletionToken&& token) {
 
     return init.result.get();
 }
-
-template <typename T>
-struct async_get_connection_impl_default<T, Require<Connection<T>>> {
-    template <typename Conn, typename Handler>
-    static constexpr void apply(Conn&& c, Handler&& h) {
-        reset_error_context(c);
-        auto ex = get_executor(c);
-        asio::dispatch(ex, detail::bind(std::forward<Handler>(h), error_code{}, std::forward<Conn>(c)));
-    }
-};
 
 namespace detail {
 
